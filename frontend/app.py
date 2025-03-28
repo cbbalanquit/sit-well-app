@@ -98,6 +98,9 @@ if analysis_mode == "Single Image":
                             with col2:
                                 if result['status'] == 'success':
                                     st.success(f"Posture Quality: {result.get('posture_quality', 'Unknown').upper()}")
+                                    
+                                    if 'annotated_image' in result:
+                                        st.image(result['annotated_image'], caption="Posture Analysis", use_column_width=True)
 
                                     if result.get('issues'):
                                         st.subheader("Issues Detected:")

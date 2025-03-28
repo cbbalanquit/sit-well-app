@@ -1,11 +1,15 @@
 import io
 
 from fastapi import FastAPI, UploadFile, File
+import torch
 from ultralytics import YOLO
+from ultralytics.nn.tasks import PoseModel
+from torch.nn.modules.container import Sequential
 import cv2
 import numpy as np
 
 app = FastAPI()
+
 model = YOLO('yolo11n-pose.pt')
 
 @app.post("/detect_pose")

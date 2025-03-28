@@ -1,0 +1,32 @@
+services:
+  inference:
+    build: ./inference
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./inference:/app
+    restart: unless-stopped
+
+  api-backend:
+    build: ./api-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api-backend:/app
+    environment:
+      - INFERENCE_URL=http://inference:8000/detect_pose
+    depends_on:
+      - inference
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - API_URL=http://api-backend:8080
+    depends_on:
+      - api-backend
+    restart: unless-stopped
