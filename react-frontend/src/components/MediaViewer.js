@@ -23,7 +23,7 @@ const MediaViewer = ({
   useEffect(() => {
     if (mode === 'live' && !isLiveActive) {
       startLiveStream();
-    } else if (mode !== 'live' && isLiveActive) {
+    } else if (mode !== 'live') {
       stopLiveStream();
     }
     
