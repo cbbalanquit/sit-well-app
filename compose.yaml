@@ -1,32 +1,56 @@
+version: '3.8'
+
 services:
-  inference:
-    build: ./inference
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api_service
+    networks:
+      - sitwell-network
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+
+  api_service:
+    build:
+      context: ./backend/api_service
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./inference:/app
+    depends_on:
+      - inference_service
+    networks:
+      - sitwell-network
+    environment:
+      - INFERENCE_SERVICE_URL=http://inference_service:8001
+      - CORS_ORIGINS=http://localhost:3000,http://frontend:3000
     restart: unless-stopped
 
-  api-backend:
-    build: ./api-backend
+  inference_service:
+    build:
+      context: ./backend/inference_service
+      dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "8001:8001"
+    networks:
+      - sitwell-network
     volumes:
-      - ./api-backend:/app
-    environment:
-      - INFERENCE_URL=http://inference:8000/detect_pose
-    depends_on:
-      - inference
+      - model-data:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./frontend:/app
-    environment:
-      - API_URL=http://api-backend:8080
-    depends_on:
-      - api-backend
-    restart: unless-stopped
+networks:
+  sitwell-network:
+    driver: bridge
+
+volumes:
+  model-data:
