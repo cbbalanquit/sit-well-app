@@ -1,5 +1,6 @@
 // src/components/SitWellApp.js
 import React, { useState, useEffect, useRef } from 'react';
+import PostureService from '../services/PostureService';
 import Header from './Header';
 import ControlPanel from './ControlPanel';
 import MediaViewer from './MediaViewer';
@@ -18,10 +19,16 @@ const SitWellApp = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingInterval, setRecordingInterval] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [analysisInterval, setAnalysisInterval] = useState(null);
   
   const isMobile = useMediaQuery('(max-width: 768px)');
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+
+  const toggleRecording = () => {
+    setIsRecording(prev => !prev);
+  };
   
   // Toggle between upload and live modes
   const toggleMode = (selectedMode) => {
@@ -37,17 +44,48 @@ const SitWellApp = () => {
   };
   
   // Handle file upload
-  const handleFileUpload = (file) => {
+  const handleFileUpload = async (file) => {
     if (file) {
-      setIsProcessing(true);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setImageSource(e.target.result);
-        // In a real app, you'd call your ML model here
-        analyzePosture(e.target.result);
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Show loading state
+        setIsLoading(true);
+        
+        // First, display the original image
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setImageSource(e.target.result);
+        };
+        reader.readAsDataURL(file);
+        
+        // Send to backend for analysis
+        const result = await PostureService.analyzeImageFile(file);
+        
+        // Update the image with pose overlay
+        if (result.img_with_pose) {
+          setImageSource(`data:image/png;base64,${result.img_with_pose}`);
+        }
+        
+        // Update analysis results
+        setAnalysisResult({
+          isGoodPosture: result.isGoodPosture,
+          confidence: result.confidence,
+          feedback: result.feedback
+        });
+      } catch (error) {
+        console.error('Error analyzing image:', error);
+        setAnalysisResult({
+          isGoodPosture: false,
+          confidence: 0,
+          feedback: ['Error analyzing posture. Please try again.']
+        });
+      } finally {
+        setIsLoading(false);
+      }
     }
+  };
+
+  const handleAnalysisResult = (result) => {
+    setAnalysisResult(result);
   };
   
   // Process captured image
@@ -74,18 +112,18 @@ const SitWellApp = () => {
       if (videoRef.current && canvasRef.current) {
         captureFrameForAnalysis();
       }
-    }, 2000); // Analyze every 2 seconds
+    }, 2000); // Analyze every second
     
-    setRecordingInterval(interval);
+    setAnalysisInterval(interval);
   };
   
   // Stop recording
   const handleStopRecording = () => {
     setIsRecording(false);
     
-    if (recordingInterval) {
-      clearInterval(recordingInterval);
-      setRecordingInterval(null);
+    if (analysisInterval) {
+      clearInterval(analysisInterval);
+      setAnalysisInterval(null);
     }
   };
   
@@ -107,43 +145,40 @@ const SitWellApp = () => {
   };
   
   // Analyze posture (mock function - would connect to backend)
-  const analyzePosture = (imageData, isBackground = false) => {
+  const analyzePosture = async (imageData, isBackground = false) => {
     if (!isBackground) {
       setIsProcessing(true);
     }
     
-    // Mock analysis - in a real app, you'd call your backend/ML model
-    setTimeout(() => {
-      const postures = ['good', 'poor', 'good', 'poor', 'good'];
-      const randomIndex = Math.floor(Math.random() * postures.length);
-      const isGoodPosture = postures[randomIndex] === 'good';
+    try {
+      // Send to backend API for analysis
+      const result = await PostureService.analyzeImageData(imageData);
       
-      const feedback = [];
-      
-      if (isGoodPosture) {
-        feedback.push("Shoulders are well-aligned");
-        feedback.push("Neck is at a good angle");
-        feedback.push("Back is properly supported");
-        feedback.push("Screen height appears appropriate");
-      } else {
-        feedback.push("Shoulders appear slightly hunched");
-        feedback.push("Neck is tilted forward too much");
-        feedback.push("Lower back needs better support");
-        feedback.push("Consider raising your screen height");
-      }
-      
-      const results = {
-        isGoodPosture,
-        confidence: 70 + Math.floor(Math.random() * 20),
-        feedback,
+      // Update analysis results
+      setAnalysisResult({
+        isGoodPosture: result.isGoodPosture,
+        confidence: result.confidence,
+        feedback: result.feedback,
         timestamp: new Date().toLocaleTimeString()
-      };
+      });
       
-      setAnalysisResult(results);
+      // If this was from capture mode and result has an image, update the display
+      if (!isBackground && result.img_with_pose) {
+        setImageSource(`data:image/png;base64,${result.img_with_pose}`);
+      }
+    } catch (error) {
+      console.error('Error analyzing posture:', error);
+      setAnalysisResult({
+        isGoodPosture: false,
+        confidence: 0,
+        feedback: ['Error analyzing posture. Please try again.'],
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } finally {
       if (!isBackground) {
         setIsProcessing(false);
       }
-    }, isBackground ? 500 : 1000); // Shorter delay for background analysis
+    }
   };
   
   // Reset the analysis and image
@@ -155,11 +190,11 @@ const SitWellApp = () => {
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      if (recordingInterval) {
-        clearInterval(recordingInterval);
+      if (analysisInterval) {
+        clearInterval(analysisInterval);
       }
     };
-  }, [recordingInterval]);
+  }, [analysisInterval]);
   
   return (
     <div className="sit-well-app">
@@ -179,6 +214,7 @@ const SitWellApp = () => {
             handleStartRecording={handleStartRecording}
             handleStopRecording={handleStopRecording}
             isRecording={isRecording}
+            toggleRecording={toggleRecording}
           />
           
           <MediaViewer 
@@ -194,6 +230,7 @@ const SitWellApp = () => {
             isRecording={isRecording}
             videoRef={videoRef}
             canvasRef={canvasRef}
+            onAnalysisResult={handleAnalysisResult}
           />
           
           <OutputPanel 

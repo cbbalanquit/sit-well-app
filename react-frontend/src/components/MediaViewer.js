@@ -1,6 +1,8 @@
 // src/components/MediaViewer.js
 import React, { useState, useRef, useEffect } from 'react';
 import './MediaViewer.css';
+import PostureService from '../services/PostureService';
+import throttle from 'lodash.throttle';
 
 const MediaViewer = ({ 
   mode, 
@@ -12,12 +14,14 @@ const MediaViewer = ({
   onLiveStatusChange,
   selectedCamera,
   resetAnalysis,
-  isRecording
+  isRecording,
+  onAnalysisResult
 }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Start or stop live camera stream based on mode
   useEffect(() => {
@@ -41,6 +45,36 @@ const MediaViewer = ({
       startLiveStream();
     }
   }, [selectedCamera]);
+
+  useEffect(() => {
+  let analysisInterval;
+  
+  if (mode === 'live' && liveMode === 'record' && isRecording && isLiveActive) {
+    // Start continuous analysis
+    analysisInterval = setInterval(() => {
+      if (videoRef.current) {
+        captureAndAnalyzeFrame();
+      }
+    }, 2000); // Analyze every second
+  } else {
+    // Remove skeleton overlay if not in recording mode
+    const overlay = document.getElementById('skeleton-overlay');
+    if (overlay) {
+      overlay.remove();
+    }
+  }
+  
+  return () => {
+    if (analysisInterval) {
+      clearInterval(analysisInterval);
+    }
+    // Cleanup skeleton overlay on unmount
+    const overlay = document.getElementById('skeleton-overlay');
+    if (overlay) {
+      overlay.remove();
+    }
+  };
+}, [mode, liveMode, isRecording, isLiveActive]);
   
   // Start live camera stream
   const startLiveStream = async () => {
@@ -88,7 +122,7 @@ const MediaViewer = ({
   };
   
   // Capture single frame for analysis
-  const captureFrame = () => {
+  const captureFrame = async () => {
     if (canvasRef.current && videoRef.current) {
       const canvas = canvasRef.current;
       const video = videoRef.current;
@@ -100,9 +134,126 @@ const MediaViewer = ({
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       const imageData = canvas.toDataURL('image/png');
-      onImageCapture(imageData);
+      
+      try {
+        // Show captured image immediately
+        onImageCapture(imageData);
+        
+        // If in capture mode, analyze the image
+        if (liveMode === 'capture') {
+          // Set loading state if needed
+          setIsLoading(true);
+          
+          // Send to backend API for analysis
+          const result = await PostureService.analyzeImageData(imageData);
+          
+          // Update the image with pose overlay if available
+          if (result.img_with_pose) {
+            onImageCapture(`data:image/png;base64,${result.img_with_pose}`);
+          }
+          
+          // Pass analysis results to parent
+          onAnalysisResult(result);
+        } else if (liveMode === 'record' && isRecording) {
+          // Handle recording/continuous analysis
+          analyzeContinuously(imageData);
+        }
+      } catch (error) {
+        console.error('Error analyzing image:', error);
+        onAnalysisResult({
+          isGoodPosture: false,
+          confidence: 0,
+          feedback: ['Error analyzing posture. Please try again.']
+        });
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
+
+  const captureAndAnalyzeFrame = async () => {
+    if (canvasRef.current && videoRef.current) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      const imageData = canvas.toDataURL('image/png');
+      
+      try {
+        // Send to backend API for analysis
+        const result = await PostureService.analyzeImageData(imageData);
+        
+        // Pass analysis results to parent
+        onAnalysisResult(result);
+        
+        // Add this block to display the skeleton in record mode
+        if (liveMode === 'record' && result.img_with_pose) {
+          // Create an image element to display the skeleton
+          const skeletonImg = new Image();
+          skeletonImg.onload = () => {
+            // Clear the canvas and draw the new image with skeleton
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(skeletonImg, 0, 0, canvas.width, canvas.height);
+            
+            // Draw the skeleton overlay on the video
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = canvas.width;
+            overlayCanvas.height = canvas.height;
+            const overlayContext = overlayCanvas.getContext('2d');
+            
+            // Draw the original video frame
+            const videoFrame = document.createElement('canvas');
+            videoFrame.width = canvas.width;
+            videoFrame.height = canvas.height;
+            const videoContext = videoFrame.getContext('2d');
+            videoContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Draw skeleton on top with transparency
+            overlayContext.drawImage(videoFrame, 0, 0);
+            overlayContext.globalAlpha = 0.6; // Adjust transparency
+            overlayContext.drawImage(skeletonImg, 0, 0);
+            
+            // Create a separate overlay div to display the skeleton
+            if (!document.getElementById('skeleton-overlay')) {
+              const overlayDiv = document.createElement('div');
+              overlayDiv.id = 'skeleton-overlay';
+              overlayDiv.className = 'skeleton-overlay';
+              overlayDiv.style.position = 'absolute';
+              overlayDiv.style.top = '0';
+              overlayDiv.style.left = '0';
+              overlayDiv.style.width = '100%';
+              overlayDiv.style.height = '100%';
+              overlayDiv.style.pointerEvents = 'none';
+              document.querySelector('.viewer-content').appendChild(overlayDiv);
+            }
+            
+            document.getElementById('skeleton-overlay').style.backgroundImage = `url(${overlayCanvas.toDataURL('image/png')})`;
+            document.getElementById('skeleton-overlay').style.backgroundSize = 'contain';
+            document.getElementById('skeleton-overlay').style.backgroundPosition = 'center';
+            document.getElementById('skeleton-overlay').style.backgroundRepeat = 'no-repeat';
+          };
+          skeletonImg.src = `data:image/png;base64,${result.img_with_pose}`;
+        }
+      } catch (error) {
+        console.error('Error in continuous analysis:', error);
+      }
+    }
+  };
+
+  // Add a throttled function for continuous analysis
+  const analyzeContinuously = throttle(async (imageData) => {
+    try {
+      const result = await PostureService.analyzeImageData(imageData);
+      onAnalysisResult(result);
+    } catch (error) {
+      console.error('Error in continuous analysis:', error);
+    }
+  }, 2000); // Throttle to once per second
   
   return (
     <div className="media-viewer">

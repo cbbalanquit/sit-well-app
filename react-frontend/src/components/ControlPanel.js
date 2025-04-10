@@ -14,7 +14,8 @@ const ControlPanel = ({
   setSelectedCamera,
   handleStartRecording,
   handleStopRecording,
-  isRecording
+  isRecording,
+  toggleRecording
 }) => {
   const fileInputRef = useRef(null);
   const [availableCameras, setAvailableCameras] = useState([]);
