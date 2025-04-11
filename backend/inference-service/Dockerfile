@@ -11,22 +11,19 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=600 -r requirements.txt
 
 # Create model directory
 RUN mkdir -p /app/models
 
-# Copy the application code
+# Copy the application codes
 COPY app/ ./app/
-
-# Download YOLOv8 model
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n-pose.pt').save('/app/models/')"
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV MODEL_PATH=/app/models/yolov8n-pose.pt
+ENV MODEL_PATH=/app/models/yolo11n-pose.pt
 
 # Expose the port
 EXPOSE 8001

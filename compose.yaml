@@ -1,56 +1,65 @@
-version: '3.8'
-
 services:
-  frontend:
+  api-service:
     build:
-      context: ./frontend
+      context: ./backend/api-service
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    depends_on:
-      - api_service
-    networks:
-      - sitwell-network
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
-
-  api_service:
-    build:
-      context: ./backend/api_service
-      dockerfile: Dockerfile
+    container_name: api-service
     ports:
       - "8000:8000"
-    depends_on:
-      - inference_service
-    networks:
-      - sitwell-network
+    volumes:
+      - ./backend/api-service:/app
     environment:
-      - INFERENCE_SERVICE_URL=http://inference_service:8001
-      - CORS_ORIGINS=http://localhost:3000,http://frontend:3000
-    restart: unless-stopped
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - INFERENCE_SERVICE_URL=http://inference-service:8001
+    networks:
+      - app-network
 
-  inference_service:
+  inference-service:
     build:
-      context: ./backend/inference_service
+      context: ./backend/inference-service
       dockerfile: Dockerfile
+    container_name: inference-service
     ports:
       - "8001:8001"
-    networks:
-      - sitwell-network
     volumes:
-      - model-data:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
+      - ./backend/inference-service:/app
+      - ./backend/inference-service/app/models:/app/models
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - MODEL_PATH=/app/models/yolov8n-pose.pt
+      - INFERENCE_SERVICE_URL=http://inference-service:8001
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./react-frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./react-frontend:/app
+      - /app/node_modules
+      - frontend-node-modules:/app/node_modules/.cache
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_INFERENCE_URL=http://localhost:8001
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_PORT=3000
+    depends_on:
+      - api-service
+      - inference-service
+    networks:
+      - app-network
 
 networks:
-  sitwell-network:
+  app-network:
     driver: bridge
 
 volumes:
-  model-data:
+  frontend-node-modules:
